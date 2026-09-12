@@ -37,13 +37,21 @@ main =
         dashArray =
             [ 0.02, 0.03 ]
 
+        regionConfig =
+            { lineWidth = 0.02
+            , radius = 0.05
+            , fillColor = "darkgray"
+            , lineColor = "black"
+            , dashArray = dashArray
+            }
+
         region =
             Union
-                [ TwoDimensional (Open (OpenPoint (complex 0.5 0.5)))
-                    [ OpenLine (Segment (Open (OpenPoint (complex -0.5 0.5))))
-                    , ClosedLine (Segment (Closed (ClosedPoint (complex -0.5 -0.5))))
-                    , ClosedLine (Segment (Open (OpenPoint (complex 0.5 -0.5))))
-                    , OpenLine (Segment (Open (OpenPoint (complex 0.5 0.5))))
+                [ TwoDimensional (OpenPoint (PointOpen (complex 0.5 0.5)))
+                    [ OpenSegment (Segment (OpenPoint (PointOpen (complex -0.5 0.5))))
+                    , ClosedSegment (Segment (ClosedPoint (PointClosed (complex -0.5 -0.5))))
+                    , ClosedSegment (Segment (OpenPoint (PointOpen (complex 0.5 -0.5))))
+                    , OpenSegment (Segment (OpenPoint (PointOpen (complex 0.5 0.5))))
                     ]
                 ]
     in
@@ -56,14 +64,7 @@ main =
         [ Scaffold.grid { scaffoldConfig | color = "lightgray" } window -gridSize gridSize division
         , Scaffold.origin scaffoldConfig window
         , Scaffold.unitCircle scaffoldConfig
-        , viewRegion
-            { lineWidth = 0.02
-            , radius = 0.05
-            , fillColor = "darkgray"
-            , lineColor = "black"
-            , dashArray = dashArray
-            }
-            region
+        , viewRegion regionConfig region
         ]
 
 
@@ -79,50 +80,50 @@ type Region
 
 
 type ConnectedRegion
-    = ZeroDimensional ClosedPoint
-    | OneDimensional Point (List Line)
-    | TwoDimensional Point (List Line)
+    = ZeroDimensional PointClosed
+    | OneDimensional Point (List Segment)
+    | TwoDimensional Point (List Segment)
 
 
 type Point
-    = Open OpenPoint
-    | Closed ClosedPoint
+    = OpenPoint PointOpen
+    | ClosedPoint PointClosed
 
 
 toComplex : Point -> Complex
 toComplex point =
     case point of
-        Open (OpenPoint z) ->
+        OpenPoint (PointOpen z) ->
             z
 
-        Closed (ClosedPoint z) ->
+        ClosedPoint (PointClosed z) ->
             z
 
 
-type ClosedPoint
-    = ClosedPoint Complex
+type PointClosed
+    = PointClosed Complex
 
 
-type OpenPoint
-    = OpenPoint Complex
+type PointOpen
+    = PointOpen Complex
 
 
-type Line
-    = OpenLine Edge
-    | ClosedLine Edge
+type Segment
+    = OpenSegment Edge
+    | ClosedSegment Edge
 
 
 type Edge
     = Segment Point
 
 
-endPoint : Line -> Point
+endPoint : Segment -> Point
 endPoint line =
     case line of
-        OpenLine (Segment p) ->
+        OpenSegment (Segment p) ->
             p
 
-        ClosedLine (Segment p) ->
+        ClosedSegment (Segment p) ->
             p
 
 
@@ -140,13 +141,13 @@ viewConnectedRegion : { a | radius : Float, dashArray : List Float } -> Connecte
 viewConnectedRegion config region =
     case region of
         ZeroDimensional closedPoint ->
-            viewPoint config (Closed closedPoint)
+            viewPoint config (ClosedPoint closedPoint)
 
-        OneDimensional start curve ->
-            viewJordan config start curve
+        OneDimensional start contour ->
+            viewJordan config start contour
 
-        TwoDimensional start curve ->
-            viewFace config start curve
+        TwoDimensional start contour ->
+            viewFace config start contour
 
 
 viewPoint : { a | radius : Float, dashArray : List Float } -> Point -> Svg msg
@@ -163,10 +164,10 @@ viewPoint config point =
 
         specific =
             case point of
-                Open (OpenPoint _) ->
+                OpenPoint (PointOpen _) ->
                     [ SvgAttribute.strokeDasharray (dashArrayDescription config.dashArray) ]
 
-                Closed (ClosedPoint _) ->
+                ClosedPoint (PointClosed _) ->
                     []
 
         attributes =
@@ -178,26 +179,26 @@ viewPoint config point =
     Svg.circle attributes []
 
 
-viewJordan : { a | radius : Float, dashArray : List Float } -> Point -> List Line -> Svg msg
-viewJordan config start curve =
+viewJordan : { a | radius : Float, dashArray : List Float } -> Point -> List Segment -> Svg msg
+viewJordan config start contour =
     let
         points =
-            curve
+            contour
                 |> List.map endPoint
                 |> (::) start
                 |> List.map (viewPoint config)
                 |> Svg.g []
     in
     Svg.g []
-        [ viewEdge config start curve
+        [ viewEdge config start contour
         , points
         ]
 
 
-viewEdge : { a | dashArray : List Float } -> Point -> List Line -> Svg msg
-viewEdge config start curve =
+viewEdge : { a | dashArray : List Float } -> Point -> List Segment -> Svg msg
+viewEdge config start contour =
     let
-        go : List (Svg msg) -> Point -> List Line -> Svg msg
+        go : List (Svg msg) -> Point -> List Segment -> Svg msg
         go acc from cs =
             case cs of
                 [] ->
@@ -210,10 +211,10 @@ viewEdge config start curve =
                     in
                     go (viewLine config from line :: acc) to tail
     in
-    go [] start curve
+    go [] start contour
 
 
-viewLine : { a | dashArray : List Float } -> Point -> Line -> Svg msg
+viewLine : { a | dashArray : List Float } -> Point -> Segment -> Svg msg
 viewLine config from line =
     let
         start =
@@ -233,10 +234,10 @@ viewLine config from line =
 
         special =
             case line of
-                OpenLine _ ->
+                OpenSegment _ ->
                     [ SvgAttribute.strokeDasharray (dashArrayDescription config.dashArray) ]
 
-                ClosedLine _ ->
+                ClosedSegment _ ->
                     []
 
         attributes =
@@ -245,10 +246,10 @@ viewLine config from line =
     Svg.line attributes []
 
 
-viewFace : { a | dashArray : List Float, radius : Float } -> Point -> List Line -> Svg msg
-viewFace config start curve =
+viewFace : { a | dashArray : List Float, radius : Float } -> Point -> List Segment -> Svg msg
+viewFace config start contour =
     let
-        toCommand : Line -> Command
+        toCommand : Segment -> Command
         toCommand line =
             line
                 |> endPoint
@@ -257,7 +258,7 @@ viewFace config start curve =
         commands =
             List.concat
                 [ List.singleton (lift MoveTo start)
-                , List.map toCommand curve
+                , List.map toCommand contour
                 , List.singleton ClosePath
                 ]
     in
@@ -267,7 +268,7 @@ viewFace config start curve =
             , SvgAttribute.stroke "none"
             ]
             []
-        , viewJordan config start curve
+        , viewJordan config start contour
         ]
 
 
