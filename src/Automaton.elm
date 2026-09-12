@@ -5,7 +5,7 @@ import Html exposing (Html)
 import Scaffold
 import Svg exposing (Svg)
 import Svg.Attributes as SvgAttribute
-import Svg.Path as Path exposing (Command(..))
+import Svg.Path as Path exposing (Command(..), Size(..), Sweep(..))
 
 
 main : Html msg
@@ -49,9 +49,9 @@ main =
             Union
                 [ TwoDimensional (OpenPoint (PointOpen (complex 0.5 0.5)))
                     [ OpenSegment (Segment (OpenPoint (PointOpen (complex -0.5 0.5))))
-                    , ClosedSegment (Segment (ClosedPoint (PointClosed (complex -0.5 -0.5))))
+                    , ClosedSegment (Circle 0.75 Small (ClosedPoint (PointClosed (complex -0.5 -0.5))))
                     , ClosedSegment (Segment (OpenPoint (PointOpen (complex 0.5 -0.5))))
-                    , OpenSegment (Segment (OpenPoint (PointOpen (complex 0.5 0.5))))
+                    , OpenSegment (Circle 0.75 Small (OpenPoint (PointOpen (complex 0.5 0.5))))
                     ]
                 ]
     in
@@ -113,17 +113,38 @@ type Segment
     | ClosedSegment Edge
 
 
+toEdge : Segment -> Edge
+toEdge segment =
+    case segment of
+        OpenSegment edge ->
+            edge
+
+        ClosedSegment edge ->
+            edge
+
+
 type Edge
     = Segment Point
+    | Circle Float Size Point
 
 
 endPoint : Segment -> Point
 endPoint line =
     case line of
-        OpenSegment (Segment p) ->
+        OpenSegment edge ->
+            edgeEndPoint edge
+
+        ClosedSegment edge ->
+            edgeEndPoint edge
+
+
+edgeEndPoint : Edge -> Point
+edgeEndPoint edge =
+    case edge of
+        Segment p ->
             p
 
-        ClosedSegment (Segment p) ->
+        Circle _ _ p ->
             p
 
 
@@ -144,7 +165,7 @@ viewConnectedRegion config region =
             viewPoint config (ClosedPoint closedPoint)
 
         OneDimensional start contour ->
-            viewJordan config start contour
+            viewContour config start contour
 
         TwoDimensional start contour ->
             viewFace config start contour
@@ -179,8 +200,8 @@ viewPoint config point =
     Svg.circle attributes []
 
 
-viewJordan : { a | radius : Float, dashArray : List Float } -> Point -> List Segment -> Svg msg
-viewJordan config start contour =
+viewContour : { a | radius : Float, dashArray : List Float } -> Point -> List Segment -> Svg msg
+viewContour config start contour =
     let
         points =
             contour
@@ -204,46 +225,68 @@ viewEdge config start contour =
                 [] ->
                     Svg.g [] (List.reverse acc)
 
-                line :: tail ->
+                segment :: tail ->
                     let
                         to =
-                            endPoint line
+                            endPoint segment
                     in
-                    go (viewLine config from line :: acc) to tail
+                    go (viewSegment config from segment :: acc) to tail
     in
     go [] start contour
 
 
-viewLine : { a | dashArray : List Float } -> Point -> Segment -> Svg msg
-viewLine config from line =
+viewSegment : { a | dashArray : List Float } -> Point -> Segment -> Svg msg
+viewSegment config from segment =
     let
         start =
             toComplex from
 
         finish =
-            line
+            segment
                 |> endPoint
                 |> toComplex
 
-        standard =
-            [ SvgAttribute.x1 (String.fromFloat (Complex.re start))
-            , SvgAttribute.y1 (String.fromFloat (Complex.im start))
-            , SvgAttribute.x2 (String.fromFloat (Complex.re finish))
-            , SvgAttribute.y2 (String.fromFloat (Complex.im finish))
-            ]
-
-        special =
-            case line of
+        general =
+            case segment of
                 OpenSegment _ ->
                     [ SvgAttribute.strokeDasharray (dashArrayDescription config.dashArray) ]
 
                 ClosedSegment _ ->
                     []
-
-        attributes =
-            List.concat [ standard, special ]
     in
-    Svg.line attributes []
+    case toEdge segment of
+        Segment _ ->
+            let
+                standard =
+                    [ SvgAttribute.x1 (String.fromFloat (Complex.re start))
+                    , SvgAttribute.y1 (String.fromFloat (Complex.im start))
+                    , SvgAttribute.x2 (String.fromFloat (Complex.re finish))
+                    , SvgAttribute.y2 (String.fromFloat (Complex.im finish))
+                    ]
+
+                attributes =
+                    List.concat [ standard, general ]
+            in
+            Svg.line attributes []
+
+        Circle radius size _ ->
+            let
+                r =
+                    abs radius
+
+                sweep =
+                    if r >= 0.0 then
+                        Apple
+
+                    else
+                        Pear
+
+                commands =
+                    [ lift MoveTo from
+                    , lift (ArcTo r r 0 size sweep) (endPoint segment)
+                    ]
+            in
+            Svg.path [ Path.toPath commands ] []
 
 
 viewFace : { a | dashArray : List Float, radius : Float } -> Point -> List Segment -> Svg msg
@@ -268,7 +311,7 @@ viewFace config start contour =
             , SvgAttribute.stroke "none"
             ]
             []
-        , viewJordan config start contour
+        , viewContour config start contour
         ]
 
 
