@@ -1,4 +1,4 @@
-module Complex exposing (Complex, complex, im, re)
+module Complex exposing (Complex, complex, im, inverse, re)
 
 
 type Complex
@@ -18,3 +18,18 @@ re (Cartesian { real }) =
 im : Complex -> Float
 im (Cartesian { imaginary }) =
     imaginary
+
+
+inverse : Complex -> Complex
+inverse (Cartesian { real, imaginary }) =
+    let
+        n =
+            real * real + imaginary * imaginary
+
+        r =
+            real / n
+
+        i =
+            -imaginary / n
+    in
+    Cartesian { real = r, imaginary = i }

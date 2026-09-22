@@ -45,15 +45,18 @@ main =
             , dashArray = dashArray
             }
 
-        region =
+        original =
             Union
                 [ TwoDimensional (OpenPoint (PointOpen (complex 0.5 0.5)))
                     [ OpenSegment (Segment (OpenPoint (PointOpen (complex -0.5 0.5))))
-                    , ClosedSegment (Circle 0.75 Small (ClosedPoint (PointClosed (complex -0.5 -0.5))))
+                    , ClosedSegment (Circle -0.75 Small (ClosedPoint (PointClosed (complex -0.5 -0.5))))
                     , ClosedSegment (Segment (OpenPoint (PointOpen (complex 0.5 -0.5))))
                     , OpenSegment (Circle 0.75 Small (OpenPoint (PointOpen (complex 0.5 0.5))))
                     ]
                 ]
+
+        transformed =
+            regionInverse original
     in
     Svg.svg
         [ SvgAttribute.width (String.fromInt size)
@@ -64,7 +67,8 @@ main =
         [ Scaffold.grid { scaffoldConfig | color = "lightgray" } window -gridSize gridSize division
         , Scaffold.origin scaffoldConfig window
         , Scaffold.unitCircle scaffoldConfig
-        , viewRegion regionConfig region
+        , viewRegion regionConfig original
+        , viewRegion regionConfig transformed
         ]
 
 
@@ -79,15 +83,67 @@ type Region
     = Union (List ConnectedRegion)
 
 
+regionInverse : Region -> Region
+regionInverse (Union connectedRegions) =
+    connectedRegions
+        |> List.map connectedRegionInverse
+        |> Union
+
+
 type ConnectedRegion
     = ZeroDimensional PointClosed
     | OneDimensional Point (List Segment)
     | TwoDimensional Point (List Segment)
 
 
+connectedRegionInverse : ConnectedRegion -> ConnectedRegion
+connectedRegionInverse connectedRegion =
+    let
+        -- TODO determine right orientation
+        toPointClosed : Point -> PointClosed
+        toPointClosed p =
+            p
+                |> toComplex
+                |> PointClosed
+    in
+    case connectedRegion of
+        ZeroDimensional point ->
+            point
+                |> ClosedPoint
+                |> pointInverse
+                |> toPointClosed
+                |> ZeroDimensional
+
+        OneDimensional start contour ->
+            contour
+                |> List.map segmentInverse
+                |> OneDimensional (pointInverse start)
+
+        TwoDimensional start contour ->
+            contour
+                |> List.map segmentInverse
+                |> TwoDimensional (pointInverse start)
+
+
 type Point
     = OpenPoint PointOpen
     | ClosedPoint PointClosed
+
+
+pointInverse : Point -> Point
+pointInverse point =
+    case point of
+        OpenPoint (PointOpen z) ->
+            z
+                |> Complex.inverse
+                |> PointOpen
+                |> OpenPoint
+
+        ClosedPoint (PointClosed z) ->
+            z
+                |> Complex.inverse
+                |> PointOpen
+                |> OpenPoint
 
 
 toComplex : Point -> Complex
@@ -113,6 +169,16 @@ type Segment
     | ClosedSegment Edge
 
 
+segmentInverse : Segment -> Segment
+segmentInverse segment =
+    case segment of
+        OpenSegment edge ->
+            OpenSegment (edgeInverse edge)
+
+        ClosedSegment edge ->
+            ClosedSegment (edgeInverse edge)
+
+
 toEdge : Segment -> Edge
 toEdge segment =
     case segment of
@@ -126,6 +192,22 @@ toEdge segment =
 type Edge
     = Segment Point
     | Circle Float Size Point
+
+
+edgeInverse : Edge -> Edge
+edgeInverse edge =
+    case edge of
+        Segment point ->
+            Segment (pointInverse point)
+
+        Circle radius size point ->
+            let
+                r =
+                    radius
+
+                -- TODO calculate correct radius
+            in
+            Circle r size (pointInverse point)
 
 
 endPoint : Segment -> Point
@@ -238,70 +320,55 @@ viewEdge config start contour =
 viewSegment : { a | dashArray : List Float } -> Point -> Segment -> Svg msg
 viewSegment config from segment =
     let
-        start =
-            toComplex from
-
-        finish =
-            segment
-                |> endPoint
-                |> toComplex
-
-        general =
+        dashed =
             case segment of
                 OpenSegment _ ->
                     [ SvgAttribute.strokeDasharray (dashArrayDescription config.dashArray) ]
 
                 ClosedSegment _ ->
                     []
+
+        path =
+            [ lift MoveTo from
+            , toCommand (toEdge segment)
+            ]
+                |> Path.toPath
+                |> List.singleton
+
+        attributes =
+            List.concat [ path, dashed, [ SvgAttribute.fill "none" ] ]
     in
-    case toEdge segment of
-        Segment _ ->
-            let
-                standard =
-                    [ SvgAttribute.x1 (String.fromFloat (Complex.re start))
-                    , SvgAttribute.y1 (String.fromFloat (Complex.im start))
-                    , SvgAttribute.x2 (String.fromFloat (Complex.re finish))
-                    , SvgAttribute.y2 (String.fromFloat (Complex.im finish))
-                    ]
+    Svg.path attributes []
 
-                attributes =
-                    List.concat [ standard, general ]
-            in
-            Svg.line attributes []
 
-        Circle radius size _ ->
+toCommand : Edge -> Command
+toCommand edge =
+    case edge of
+        Segment point ->
+            lift LineTo point
+
+        Circle radius size point ->
             let
                 r =
                     abs radius
 
                 sweep =
-                    if r >= 0.0 then
+                    if radius >= 0.0 then
                         Apple
 
                     else
                         Pear
-
-                commands =
-                    [ lift MoveTo from
-                    , lift (ArcTo r r 0 size sweep) (endPoint segment)
-                    ]
             in
-            Svg.path [ Path.toPath commands ] []
+            lift (ArcTo r r 0 size sweep) point
 
 
 viewFace : { a | dashArray : List Float, radius : Float } -> Point -> List Segment -> Svg msg
 viewFace config start contour =
     let
-        toCommand : Segment -> Command
-        toCommand line =
-            line
-                |> endPoint
-                |> lift LineTo
-
         commands =
             List.concat
                 [ List.singleton (lift MoveTo start)
-                , List.map toCommand contour
+                , List.map (toEdge >> toCommand) contour
                 , List.singleton ClosePath
                 ]
     in
@@ -316,9 +383,9 @@ viewFace config start contour =
 
 
 lift : (Float -> Float -> Command) -> Point -> Command
-lift toCommand point =
+lift command point =
     let
         z =
             toComplex point
     in
-    toCommand (Complex.re z) (Complex.im z)
+    command (Complex.re z) (Complex.im z)
