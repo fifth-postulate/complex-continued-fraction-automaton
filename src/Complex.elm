@@ -1,4 +1,4 @@
-module Complex exposing (Complex, complex, im, inverse, re)
+module Complex exposing (Complex, complex, conjugate, im, inverse, negate, norm, re)
 
 
 type Complex
@@ -20,16 +20,32 @@ im (Cartesian { imaginary }) =
     imaginary
 
 
+norm : Complex -> Float
+norm (Cartesian { real, imaginary }) =
+    real * real + imaginary * imaginary
+
+
 inverse : Complex -> Complex
-inverse (Cartesian { real, imaginary }) =
+inverse z =
     let
         n =
-            real * real + imaginary * imaginary
-
-        r =
-            real / n
-
-        i =
-            -imaginary / n
+            norm z
     in
-    Cartesian { real = r, imaginary = i }
+    z
+        |> scale (1 / n)
+        |> conjugate
+
+
+conjugate : Complex -> Complex
+conjugate (Cartesian { real, imaginary }) =
+    Cartesian { real = real, imaginary = -imaginary }
+
+
+negate : Complex -> Complex
+negate (Cartesian { real, imaginary }) =
+    Cartesian { real = -real, imaginary = -imaginary }
+
+
+scale : Float -> Complex -> Complex
+scale s (Cartesian { real, imaginary }) =
+    Cartesian { real = s * real, imaginary = s * imaginary }
